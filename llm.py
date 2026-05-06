@@ -79,7 +79,7 @@ class GroqLLM:
         self._model = model
         self.timezone = timezone
 
-    def process(self, user_message: str) -> dict:
+    def process(self, user_message: str, history: list[dict] = None) -> dict:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S (%A)")
         system = SYSTEM_PROMPT.format(
             current_datetime=now,
@@ -87,12 +87,13 @@ class GroqLLM:
             context=_get_context(),
         )
 
+        messages = [{"role": "system", "content": system}]
+        messages.extend(history or [])
+        messages.append({"role": "user", "content": user_message})
+
         response = self._client.chat.completions.create(
             model=self._model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user_message},
-            ],
+            messages=messages,
             response_format={"type": "json_object"},
         )
         raw = _strip_fences(response.choices[0].message.content)
@@ -110,7 +111,7 @@ class GeminiLLM:
         self.timezone = timezone
         self._model_name = model
 
-    def process(self, user_message: str) -> dict:
+    def process(self, user_message: str, history: list[dict] = None) -> dict:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S (%A)")
         system = SYSTEM_PROMPT.format(
             current_datetime=now,
@@ -118,12 +119,17 @@ class GeminiLLM:
             context=_get_context(),
         )
 
+        gemini_history = [
+            {"role": "model" if t["role"] == "assistant" else t["role"], "parts": [t["content"]]}
+            for t in (history or [])
+        ]
+
         model = genai.GenerativeModel(
             model_name=self._model_name,
             system_instruction=system,
         )
 
-        response = model.generate_content(user_message)
+        response = model.start_chat(history=gemini_history).send_message(user_message)
         raw = _strip_fences(response.text)
 
         try:

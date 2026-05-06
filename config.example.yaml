@@ -7,4 +7,12 @@ gemini:
   api_key: "YOUR_GEMINI_API_KEY"
   model: "gemini-1.5-flash"  # or gemini-2.0-flash
 
+groq:
+  api_key: "YOUR_GROQ_API_KEY"
+  model: "openai/gpt-oss-20b"
+
+provider: "gemini"  # "gemini" or "groq"
+
+max_history_turns: 20  # user+assistant pairs to keep per chat
+
 timezone: "Europe/Paris"  # your local timezone (IANA format)

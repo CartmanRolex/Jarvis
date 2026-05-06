@@ -3,6 +3,7 @@ from datetime import datetime
 
 import requests
 
+import history as history_store
 import storage
 from llm import GeminiLLM, update_context
 from scheduler import ReminderScheduler
@@ -11,10 +12,11 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramBot:
-    def __init__(self, token: str):
+    def __init__(self, token: str, max_turns: int = 20):
         self.token = token
         self.base_url = f"https://api.telegram.org/bot{token}"
         self.session = requests.Session()
+        self.max_turns = max_turns
 
     def get_updates(self, offset: int = None, timeout: int = 30) -> list:
         params = {"timeout": timeout}
@@ -69,14 +71,18 @@ class TelegramBot:
 
         self.send_chat_action(chat_id, "typing")
 
+        chat_history = history_store.get_history(chat_id, self.max_turns)
+
         try:
-            result = llm.process(text)
+            result = llm.process(text, history=chat_history)
         except Exception as e:
             logger.error(f"LLM error: {e}")
             self.send_message(chat_id, "Sorry, I couldn't process that. Please try again.")
             return
 
-        self.send_message(chat_id, result.get("reply", "Done!"))
+        reply_text = result.get("reply", "Done!")
+        self.send_message(chat_id, reply_text)
+        history_store.append_turn(chat_id, text, reply_text, self.max_turns)
 
         for action in result.get("actions", []):
             atype = action.get("type")

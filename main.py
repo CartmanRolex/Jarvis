@@ -40,7 +40,8 @@ def main():
             timezone=timezone,
         )
 
-    bot = TelegramBot(token)
+    max_turns = config.get("max_history_turns", 20)
+    bot = TelegramBot(token, max_turns=max_turns)
     scheduler = ReminderScheduler(timezone=timezone, bot_token=token)
     scheduler.start()
 

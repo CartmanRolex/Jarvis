@@ -6,6 +6,7 @@ import yaml
 
 from bot import TelegramBot
 from llm import GeminiLLM, GroqLLM
+from transcriber import Transcriber
 from scheduler import ReminderScheduler
 
 logging.basicConfig(
@@ -40,8 +41,12 @@ def main():
             timezone=timezone,
         )
 
+    transcriber = None
+    if "groq" in config:
+        transcriber = Transcriber(api_key=config["groq"]["api_key"])
+
     max_turns = config.get("max_history_turns", 20)
-    bot = TelegramBot(token, max_turns=max_turns)
+    bot = TelegramBot(token, max_turns=max_turns, transcriber=transcriber)
     scheduler = ReminderScheduler(timezone=timezone, bot_token=token)
     scheduler.start()
 

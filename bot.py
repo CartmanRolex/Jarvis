@@ -12,11 +12,12 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramBot:
-    def __init__(self, token: str, max_turns: int = 20):
+    def __init__(self, token: str, max_turns: int = 20, transcriber=None):
         self.token = token
         self.base_url = f"https://api.telegram.org/bot{token}"
         self.session = requests.Session()
         self.max_turns = max_turns
+        self.transcriber = transcriber
 
     def get_updates(self, offset: int = None, timeout: int = 30) -> list:
         params = {"timeout": timeout}
@@ -36,6 +37,16 @@ class TelegramBot:
             self.session.post(f"{self.base_url}/sendMessage", json=data, timeout=10)
         except requests.RequestException as e:
             logger.error(f"Failed to send message: {e}")
+
+    def _download_voice(self, file_id: str) -> bytes:
+        resp = self.session.get(f"{self.base_url}/getFile", params={"file_id": file_id}, timeout=10)
+        resp.raise_for_status()
+        file_path = resp.json()["result"]["file_path"]
+        audio = self.session.get(
+            f"https://api.telegram.org/file/bot{self.token}/{file_path}", timeout=30
+        )
+        audio.raise_for_status()
+        return audio.content
 
     def send_chat_action(self, chat_id: int, action: str):
         try:
@@ -58,6 +69,19 @@ class TelegramBot:
 
         chat_id = message["chat"]["id"]
         text = message.get("text", "")
+
+        if not text and message.get("voice"):
+            if not self.transcriber:
+                self.send_message(chat_id, "Voice messages are not supported (no transcriber configured).")
+                return
+            try:
+                audio = self._download_voice(message["voice"]["file_id"])
+                text = self.transcriber.transcribe(audio)
+                logger.info(f"Transcribed: {text}")
+            except Exception as e:
+                logger.error(f"Transcription error: {e}")
+                self.send_message(chat_id, "Sorry, I couldn't transcribe your voice message.")
+                return
 
         if text == "/start":
             self.send_message(

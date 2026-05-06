@@ -6,6 +6,8 @@ from pathlib import Path
 import google.generativeai as genai
 from groq import Groq
 
+import storage
+
 logger = logging.getLogger(__name__)
 
 CONTEXT_FILE = Path("context.md")
@@ -19,6 +21,11 @@ Timezone: {timezone}
 User's personal context (you can read and update this):
 ---
 {context}
+---
+
+Active reminders:
+---
+{reminders}
 ---
 
 You MUST always respond with a valid JSON object and nothing else — no markdown, no code fences.
@@ -59,6 +66,17 @@ def _get_context() -> str:
     return "(empty)"
 
 
+def _get_reminders() -> str:
+    reminders = storage.get_all_reminders()
+    if not reminders:
+        return "(none)"
+    lines = []
+    for r in reminders:
+        rec = f", recurs {r['recurrence']}" if r["recurrence"] else ""
+        lines.append(f"- id={r['id']} | {r['message']} | at {r['trigger_at']}{rec}")
+    return "\n".join(lines)
+
+
 def update_context(content: str):
     CONTEXT_FILE.write_text(content, encoding="utf-8")
 
@@ -85,6 +103,7 @@ class GroqLLM:
             current_datetime=now,
             timezone=self.timezone,
             context=_get_context(),
+            reminders=_get_reminders(),
         )
 
         messages = [{"role": "system", "content": system}]
@@ -117,6 +136,7 @@ class GeminiLLM:
             current_datetime=now,
             timezone=self.timezone,
             context=_get_context(),
+            reminders=_get_reminders(),
         )
 
         gemini_history = [

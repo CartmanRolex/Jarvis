@@ -1,8 +1,7 @@
 import logging
 from datetime import datetime
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+import requests
 
 import storage
 from llm import GeminiLLM, update_context
@@ -11,27 +10,73 @@ from scheduler import ReminderScheduler
 logger = logging.getLogger(__name__)
 
 
-def setup_handlers(app: Application, scheduler: ReminderScheduler, llm: GeminiLLM, config: dict):
-    allowed = set(config["telegram"].get("allowed_user_ids", []))
+class TelegramBot:
+    def __init__(self, token: str):
+        self.token = token
+        self.base_url = f"https://api.telegram.org/bot{token}"
+        self.session = requests.Session()
 
-    def _is_allowed(update: Update) -> bool:
-        return not allowed or update.effective_user.id in allowed
+    def get_updates(self, offset: int = None, timeout: int = 30) -> list:
+        params = {"timeout": timeout}
+        if offset is not None:
+            params["offset"] = offset
+        resp = self.session.get(
+            f"{self.base_url}/getUpdates", params=params, timeout=timeout + 5
+        )
+        resp.raise_for_status()
+        return resp.json().get("result", [])
 
-    async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not _is_allowed(update):
+    def send_message(self, chat_id: int, text: str, parse_mode: str = None):
+        data = {"chat_id": chat_id, "text": text}
+        if parse_mode:
+            data["parse_mode"] = parse_mode
+        try:
+            self.session.post(f"{self.base_url}/sendMessage", json=data, timeout=10)
+        except requests.RequestException as e:
+            logger.error(f"Failed to send message: {e}")
+
+    def send_chat_action(self, chat_id: int, action: str):
+        try:
+            self.session.post(
+                f"{self.base_url}/sendChatAction",
+                json={"chat_id": chat_id, "action": action},
+                timeout=10,
+            )
+        except requests.RequestException:
+            pass
+
+    def process_update(self, update: dict, scheduler: ReminderScheduler, llm: GeminiLLM, allowed: set):
+        message = update.get("message")
+        if not message:
             return
 
-        chat_id = update.effective_chat.id
-        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        user_id = message.get("from", {}).get("id")
+        if allowed and user_id not in allowed:
+            return
+
+        chat_id = message["chat"]["id"]
+        text = message.get("text", "")
+
+        if text == "/start":
+            self.send_message(
+                chat_id,
+                "👋 Hi, I'm Jarvis. Send me a message and I'll help you set reminders or answer questions.",
+            )
+            return
+
+        if not text or text.startswith("/"):
+            return
+
+        self.send_chat_action(chat_id, "typing")
 
         try:
-            result = llm.process(update.message.text)
+            result = llm.process(text)
         except Exception as e:
             logger.error(f"LLM error: {e}")
-            await update.message.reply_text("Sorry, I couldn't process that. Please try again.")
+            self.send_message(chat_id, "Sorry, I couldn't process that. Please try again.")
             return
 
-        await update.message.reply_text(result.get("reply", "Done!"))
+        self.send_message(chat_id, result.get("reply", "Done!"))
 
         for action in result.get("actions", []):
             atype = action.get("type")
@@ -41,7 +86,7 @@ def setup_handlers(app: Application, scheduler: ReminderScheduler, llm: GeminiLL
                     trigger_at = datetime.fromisoformat(action["trigger_at"])
                 except (KeyError, ValueError) as e:
                     logger.error(f"Bad trigger_at: {e}")
-                    await update.message.reply_text("⚠️ I couldn't parse the reminder time. Please try again.")
+                    self.send_message(chat_id, "⚠️ I couldn't parse the reminder time. Please try again.")
                     continue
                 reminder = storage.add_reminder(
                     chat_id=chat_id,
@@ -55,7 +100,7 @@ def setup_handlers(app: Application, scheduler: ReminderScheduler, llm: GeminiLL
                 rid = action.get("reminder_id", "")
                 removed = scheduler.remove(rid)
                 if not removed:
-                    await update.message.reply_text(f"⚠️ No reminder found with id starting with `{rid[:8]}`.")
+                    self.send_message(chat_id, f"⚠️ No reminder found with id `{rid[:8]}`.")
 
             elif atype == "update_context":
                 update_context(action.get("content", ""))
@@ -63,21 +108,11 @@ def setup_handlers(app: Application, scheduler: ReminderScheduler, llm: GeminiLL
             elif atype == "list_reminders":
                 reminders = storage.get_all_reminders()
                 if not reminders:
-                    await update.message.reply_text("You have no scheduled reminders.")
+                    self.send_message(chat_id, "You have no scheduled reminders.")
                 else:
                     lines = ["📋 *Scheduled reminders:*"]
                     for r in reminders:
                         rec = f" _(recurs {r['recurrence']})_" if r["recurrence"] else ""
                         short_id = r["id"][:8]
                         lines.append(f"• `{short_id}` — {r['message']} @ `{r['trigger_at']}`{rec}")
-                    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
-
-    async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not _is_allowed(update):
-            return
-        await update.message.reply_text(
-            "👋 Hi, I'm Jarvis. Send me a message and I'll help you set reminders or answer questions."
-        )
-
-    app.add_handler(CommandHandler("start", on_start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
+                    self.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")

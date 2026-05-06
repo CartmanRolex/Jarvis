@@ -1,10 +1,10 @@
 import logging
-from pathlib import Path
+import time
 
+import requests
 import yaml
-from telegram.ext import Application
 
-from bot import setup_handlers
+from bot import TelegramBot
 from llm import GeminiLLM
 from scheduler import ReminderScheduler
 
@@ -23,6 +23,8 @@ def load_config(path: str = "config.yaml") -> dict:
 def main():
     config = load_config()
     timezone = config.get("timezone", "UTC")
+    token = config["telegram"]["bot_token"]
+    allowed = set(config["telegram"].get("allowed_user_ids", []))
 
     llm = GeminiLLM(
         api_key=config["gemini"]["api_key"],
@@ -30,28 +32,26 @@ def main():
         timezone=timezone,
     )
 
-    scheduler = ReminderScheduler(timezone=timezone)
+    bot = TelegramBot(token)
+    scheduler = ReminderScheduler(timezone=timezone, bot_token=token)
+    scheduler.start()
 
-    app = (
-        Application.builder()
-        .token(config["telegram"]["bot_token"])
-        .build()
-    )
+    logger.info("Jarvis is running")
 
-    setup_handlers(app, scheduler, llm, config)
-
-    async def post_init(application: Application):
-        scheduler.bot = application.bot
-        scheduler.start()
-        logger.info("Jarvis is running")
-
-    async def post_shutdown(application: Application):
-        scheduler.shutdown()
-
-    app.post_init = post_init
-    app.post_shutdown = post_shutdown
-
-    app.run_polling(drop_pending_updates=True)
+    offset = 0
+    while True:
+        try:
+            updates = bot.get_updates(offset=offset, timeout=30)
+            for update in updates:
+                offset = update["update_id"] + 1
+                bot.process_update(update, scheduler, llm, allowed)
+        except requests.RequestException as e:
+            logger.error(f"Polling error: {e}")
+            time.sleep(5)
+        except KeyboardInterrupt:
+            logger.info("Shutting down")
+            scheduler.shutdown()
+            break
 
 
 if __name__ == "__main__":

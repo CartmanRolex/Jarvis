@@ -2,7 +2,8 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import requests
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
@@ -12,17 +13,18 @@ logger = logging.getLogger(__name__)
 
 
 class ReminderScheduler:
-    def __init__(self, timezone: str):
+    def __init__(self, timezone: str, bot_token: str):
         self.timezone = timezone
-        self.bot = None  # set after Application is built
-        self.scheduler = AsyncIOScheduler(timezone=timezone)
+        self.bot_token = bot_token
+        self.scheduler = BackgroundScheduler(timezone=timezone)
 
     def start(self):
         self.scheduler.start()
         self._load_persisted()
 
     def shutdown(self):
-        self.scheduler.shutdown(wait=False)
+        if self.scheduler.running:
+            self.scheduler.shutdown(wait=False)
 
     def _load_persisted(self):
         now = datetime.now()
@@ -63,9 +65,10 @@ class ReminderScheduler:
             replace_existing=True,
         )
 
-    async def _fire(self, chat_id: int, message: str, reminder_id: str, recurrence: Optional[str]):
+    def _fire(self, chat_id: int, message: str, reminder_id: str, recurrence: Optional[str]):
         try:
-            await self.bot.send_message(chat_id=chat_id, text=f"⏰ {message}")
+            url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+            requests.post(url, json={"chat_id": chat_id, "text": f"⏰ {message}"}, timeout=10)
         except Exception as e:
             logger.error(f"Failed to send reminder {reminder_id}: {e}")
         if not recurrence:

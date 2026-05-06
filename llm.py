@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import google.generativeai as genai
+from groq import Groq
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,37 @@ def _strip_fences(text: str) -> str:
         inner = lines[1:-1] if lines[-1].strip() == "```" else lines[1:]
         text = "\n".join(inner).strip()
     return text
+
+
+class GroqLLM:
+    def __init__(self, api_key: str, model: str, timezone: str):
+        self._client = Groq(api_key=api_key)
+        self._model = model
+        self.timezone = timezone
+
+    def process(self, user_message: str) -> dict:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S (%A)")
+        system = SYSTEM_PROMPT.format(
+            current_datetime=now,
+            timezone=self.timezone,
+            context=_get_context(),
+        )
+
+        response = self._client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_message},
+            ],
+            response_format={"type": "json_object"},
+        )
+        raw = _strip_fences(response.choices[0].message.content)
+
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            logger.error(f"LLM returned non-JSON: {raw}")
+            raise ValueError("LLM response was not valid JSON")
 
 
 class GeminiLLM:

@@ -5,7 +5,7 @@ import requests
 import yaml
 
 from bot import TelegramBot
-from llm import GeminiLLM
+from llm import GeminiLLM, GroqLLM
 from scheduler import ReminderScheduler
 
 logging.basicConfig(
@@ -26,11 +26,19 @@ def main():
     token = config["telegram"]["bot_token"]
     allowed = set(config["telegram"].get("allowed_user_ids", []))
 
-    llm = GeminiLLM(
-        api_key=config["gemini"]["api_key"],
-        model=config["gemini"].get("model", "gemini-1.5-flash"),
-        timezone=timezone,
-    )
+    provider = config.get("provider", "gemini")
+    if provider == "groq":
+        llm = GroqLLM(
+            api_key=config["groq"]["api_key"],
+            model=config["groq"].get("model", "openai/gpt-oss-20b"),
+            timezone=timezone,
+        )
+    else:
+        llm = GeminiLLM(
+            api_key=config["gemini"]["api_key"],
+            model=config["gemini"].get("model", "gemini-1.5-flash"),
+            timezone=timezone,
+        )
 
     bot = TelegramBot(token)
     scheduler = ReminderScheduler(timezone=timezone, bot_token=token)

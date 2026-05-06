@@ -78,3 +78,80 @@ Jarvis/
 ## Recurring reminder options
 
 `daily` · `weekly` · `monthly` · `weekdays`
+
+## Running as a systemd service
+
+This is the recommended way to run the bot on a Linux server — it starts automatically on boot and restarts itself if it crashes.
+
+This uses a **user-level systemd service** (no `sudo` needed), which starts automatically on login and restarts on crash.
+
+### 1. Create the service file
+
+```bash
+mkdir -p ~/.config/systemd/user
+nano ~/.config/systemd/user/jarvis.service
+```
+
+Paste the following, adjusting the paths to match your setup:
+
+```ini
+[Unit]
+Description=Jarvis Telegram assistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/Jarvis
+ExecStart=/path/to/Jarvis/.venv/bin/python /path/to/Jarvis/main.py
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target
+```
+
+> If you're not using a virtual environment, replace `ExecStart` with:
+> ```
+> ExecStart=/usr/bin/python3 /path/to/Jarvis/main.py
+> ```
+
+### 2. Enable and start the service
+
+```bash
+# Reload systemd to pick up the new file
+systemctl --user daemon-reload
+
+# Enable it so it starts automatically on login
+systemctl --user enable jarvis
+
+# Start it now
+systemctl --user start jarvis
+```
+
+### Useful commands
+
+```bash
+# Check if the bot is running
+systemctl --user status jarvis
+
+# View live logs
+journalctl --user -u jarvis -f
+
+# View last 100 lines of logs
+journalctl --user -u jarvis -n 100
+
+# Restart the bot (e.g. after editing config.yaml)
+systemctl --user restart jarvis
+
+# Stop the bot
+systemctl --user stop jarvis
+
+# Disable auto-start on boot
+systemctl --user disable jarvis
+```
+
+> **After editing `config.yaml`**, always restart the service for changes to take effect:
+> ```bash
+> systemctl --user restart jarvis
+> ```
